@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full w-full overflow-hidden">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D全息唐三彩文物沉浸式科普界面</title>
+
+  <!-- Pre-configure window.tailwind object before CDN loads to prevent ReferenceError -->
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            sancaiAmber: '#d97706',
+            sancaiGreen: '#059669',
+            sancaiWhite: '#f3f4f6',
+            sancaiCobalt: '#2563eb',
+            holoCyan: '#00f0ff',
+            tangGold: '#fbbf24',
+            glassDark: 'rgba(8, 12, 20, 0.72)'
+          },
+          fontFamily: {
+            sans: ['Inter', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
+            mono: ['Fira Code', 'Courier New', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Three.js & GLTFLoader CDN (Pinned to jsDelivr for optimal stability) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+  <!-- MediaPipe Hands & Camera Utils CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.4.1675469240/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+
+  <!-- Custom Tailwind Theme Configuration -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            sancaiAmber: '#d97706',
+            sancaiGreen: '#059669',
+            sancaiWhite: '#f3f4f6',
+            sancaiCobalt: '#2563eb',
+            holoCyan: '#00f0ff',
+            tangGold: '#fbbf24',
+            glassDark: 'rgba(8, 12, 20, 0.72)'
+          },
+          fontFamily: {
+            sans: ['Inter', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
+            mono: ['Fira Code', 'Courier New', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background-color: #030712;
+      color: #f3f4f6;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Glassmorphism Panel with Holographic Amber & Cyan Border Glow */
+    .glass-panel {
+      background: rgba(10, 16, 26, 0.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(251, 191, 36, 0.25);
+      box-shadow: 0 8px 32px 0 rgba(0, 240, 255, 0.12);
+    }
+
+    .glass-panel-amber {
+      border-left: 3px solid #f59e0b;
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.2);
+    }
+
+    /* Scanlines Overlay Effect */
+    .holo-scanlines {
+      background: linear-gradient(
+        to bottom,
+        rgba(255,255,255,0),
+        rgba(255,255,255,0) 50%,
+        rgba(0, 240, 255, 0.04) 50%,
+        rgba(0, 240, 255, 0.04)
+      );
+      background-size: 100% 4px;
+    }
+
+    /* Custom range slider styling */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: rgba(251, 191, 36, 0.25);
+      height: 4px;
+      border-radius: 2px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 14px;
+      width: 14px;
+      border-radius: 50%;
+      background: #fbbf24;
+      cursor: pointer;
+      box-shadow: 0 0 10px #fbbf24;
+    }
+
+    /* Hotspot Pulsing Animation */
+    @keyframes pulse-glow {
+      0% { transform: scale(0.8); opacity: 0.9; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    .hotspot-pulse {
+      animation: pulse-glow 2s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+    }
+
+    /* Scrollbar minimal design */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+    ::-webkit-scrollbar-thumb { background: rgba(251, 191, 36, 0.4); border-radius: 2px; }
+  </style>
+</head>
+
+<body class="h-full w-full overflow-hidden relative font-sans">
+
+  <!-- Background WebCam Video Stream (Full Screen) -->
+  <video id="webcam" class="absolute inset-0 w-full h-full object-cover z-0 hidden scale-x-[-1]" autoplay playsinline muted></video>
+
+  <!-- Darkroom Overlay Layer (Controllable Opacity for Background Video Visibility) -->
+  <div id="darkroomOverlay" class="absolute inset-0 bg-gray-950 pointer-events-none z-1 transition-opacity duration-200" style="opacity: 0.65;"></div>
+
+  <!-- Holographic Cyber Grid & Scanline Visual Overlay -->
+  <div class="absolute inset-0 holo-scanlines pointer-events-none z-2 opacity-70"></div>
+
+  <!-- Main 3D Interactive Canvas -->
+  <canvas id="threeCanvas" class="absolute inset-0 w-full h-full z-3 cursor-grab active:cursor-grabbing"></canvas>
+
+  <!-- Hand Skeleton Tracking Canvas -->
+  <canvas id="skeletonCanvas" class="absolute inset-0 w-full h-full z-4 pointer-events-none scale-x-[-1]"></canvas>
+
+  <!-- 3D Hotspot DOM Anchors Container -->
+  <div id="hotspotContainer" class="absolute inset-0 z-5 pointer-events-none overflow-hidden"></div>
+
+  <!-- UI Layer -->
+  <div class="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-3 md:p-5 text-xs text-amber-100">
+
+    <!-- Top Navigation & Relic Title Header -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 pointer-events-auto">
+      
+      <!-- Brand & Relic Title Header Card -->
+      <div class="glass-panel glass-panel-amber rounded-xl p-3 md:p-3.5 max-w-xs md:max-w-md">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+          <span class="text-[9px] tracking-widest text-amber-300 font-mono uppercase">TANG DYNASTY SANCAI HOLOGRAM</span>
+        </div>
+        <h1 id="relicTitle" class="text-lg md:text-xl font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-emerald-200 to-amber-400">
+          唐三彩黑釉马
+        </h1>
+        <div class="flex items-center gap-2 mt-1 text-[10px] text-amber-200/80">
+          <span class="bg-amber-950/80 px-2 py-0.5 rounded border border-amber-700/40">盛唐时期 (8世纪)</span>
+          <span class="bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-700/40">洛阳唐墓出土精品</span>
+        </div>
+      </div>
+
+      <!-- Gesture Realtime Feedback & Control Buttons -->
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Gesture Status Badge -->
+        <div class="glass-panel rounded-lg px-3 py-1.5 flex items-center gap-2 font-mono text-[11px]">
+          <div id="handStatusDot" class="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
+          <span id="handStatusText" class="text-amber-200 font-medium">加载3D引擎中...</span>
+        </div>
+
+        <!-- Webcam Toggle Button -->
+        <button id="camToggleBtn" class="glass-panel hover:bg-amber-900/40 px-3 py-1.5 rounded-lg text-amber-300 transition flex items-center gap-1.5 active:scale-95 text-[11px]">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+          <span id="camBtnText">开启手势操控</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Middle Floating Minimal Info Drawer -->
+    <div id="infoDrawer" class="self-start glass-panel rounded-xl p-2.5 max-w-[280px] md:max-w-xs pointer-events-auto transition-all duration-300 my-auto">
+      <div class="flex justify-between items-center mb-1.5 pb-1 border-b border-amber-900/50">
+        <div class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <span id="infoTopicTitle" class="font-bold text-amber-200 text-xs tracking-wide">三彩特征与釉色</span>
+        </div>
+        <span class="text-[9px] font-mono text-emerald-400">TOUCH / GESTURE</span>
+      </div>
+      <p id="infoTopicDesc" class="text-[11px] leading-relaxed text-gray-300">
+        点击3D悬浮模型的亮点或使用手势捏合，可解读唐三彩黄、绿、白、蓝等铅釉流淌融汇的华美艺术与唐代丝绸之路盛世风貌。
+      </p>
+    </div>
+
+    <!-- Bottom Control Bar & Gesture HUD & Darkroom Opacity Slider -->
+    <div class="flex flex-col md:flex-row justify-between items-stretch md:items-end gap-2.5 pointer-events-auto">
+
+      <!-- Darkroom Video Opacity Slider Card -->
+      <div class="glass-panel rounded-xl p-2.5 flex flex-col gap-1.5 max-w-[220px]">
+        <div class="flex justify-between items-center text-[10px]">
+          <span class="text-amber-300 flex items-center gap-1 font-medium">
+            <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+            视频透明度
+          </span>
+          <span id="opacityValText" class="font-mono text-amber-400 font-bold">65%</span>
+        </div>
+        <input id="bgOpacitySlider" type="range" min="0" max="100" value="65" class="w-full cursor-pointer">
+        <div class="text-[8px] text-gray-400 flex justify-between font-mono">
+          <span>摄像头画幅</span>
+          <span>纯黑全息</span>
+        </div>
+      </div>
+
+      <!-- Gesture Guide HUD Banner -->
+      <div class="glass-panel rounded-xl p-2 px-3 flex items-center gap-2.5 text-[10px] text-amber-200/90 font-mono self-center">
+        <span class="text-amber-400 font-bold">手势交互:</span>
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="flex items-center gap-1"><span class="text-amber-400">☝️</span> 单手旋转视角</span>
+          <span class="text-amber-800">|</span>
+          <span class="flex items-center gap-1"><span class="text-amber-400">👐</span> 双手缩放</span>
+          <span class="text-amber-800">|</span>
+          <span class="flex items-center gap-1"><span class="text-amber-400">👌👌</span> 双捏切换</span>
+        </div>
+      </div>
+
+      <!-- Relic Selector Thumbnails Switcher -->
+      <div class="glass-panel rounded-xl p-1.5 flex items-center gap-1 overflow-x-auto">
+        <!-- Hidden file input for custom GLTF/GLB uploads -->
+        <input type="file" id="gltfFileInput" accept=".glb,.gltf" class="hidden">
+        
+        <button onclick="document.getElementById('gltfFileInput').click()" class="px-2 py-1 rounded-lg border border-cyan-500/50 bg-cyan-950/60 text-cyan-300 text-[11px] font-medium transition hover:bg-cyan-900/60 flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+          导入GLB/glTF
+        </button>
+
+        <button onclick="window.switchRelic(0)" id="relicBtn0" class="relic-btn px-2.5 py-1 rounded-lg border border-amber-400/50 bg-amber-900/50 text-amber-200 text-[11px] font-medium transition">
+          glTF模型
+        </button>
+        <button onclick="window.switchRelic(1)" id="relicBtn1" class="relic-btn px-2.5 py-1 rounded-lg border border-transparent text-gray-400 text-[11px] font-medium transition hover:bg-amber-950/50 hover:text-amber-300">
+          三彩马
+        </button>
+        <button onclick="window.switchRelic(2)" id="relicBtn2" class="relic-btn px-2.5 py-1 rounded-lg border border-transparent text-gray-400 text-[11px] font-medium transition hover:bg-amber-950/50 hover:text-amber-300">
+          三彩骆驼
+        </button>
+        <button onclick="window.switchRelic(3)" id="relicBtn3" class="relic-btn px-2.5 py-1 rounded-lg border border-transparent text-gray-400 text-[11px] font-medium transition hover:bg-amber-950/50 hover:text-amber-300">
+          天王俑
+        </button>
+        <button onclick="window.switchRelic(4)" id="relicBtn4" class="relic-btn px-2.5 py-1 rounded-lg border border-transparent text-gray-400 text-[11px] font-medium transition hover:bg-amber-950/50 hover:text-amber-300">
+          三彩花盘
+        </button>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    // Safe script loader to ensure THREE and GLTFLoader are defined before running logic
+    function ensureThreeLoaded(callback) {
+      if (typeof THREE !== 'undefined' && typeof THREE.GLTFLoader !== 'undefined') {
+        callback();
+        return;
+      }
+
+      // If THREE exists but GLTFLoader is pending
+      if (typeof THREE !== 'undefined' && typeof THREE.GLTFLoader === 'undefined') {
+        const loaderScript = document.createElement('script');
+        loaderScript.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+        loaderScript.onload = callback;
+        document.head.appendChild(loaderScript);
+        return;
+      }
+
+      // Dynamic fallback loader if CDNs were delayed
+      console.warn('THREE not found on primary CDN, loading fallbacks...');
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js';
+      script.onload = () => {
+        const loaderScript = document.createElement('script');
+        loaderScript.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+        loaderScript.onload = callback;
+        document.head.appendChild(loaderScript);
+      };
+      script.onerror = () => {
+        // Secondary fallback source
+        const altScript = document.createElement('script');
+        altScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+        altScript.onload = () => {
+          const altLoader = document.createElement('script');
+          altLoader.src = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/GLTFLoader.js';
+          altLoader.onload = callback;
+          document.head.appendChild(altLoader);
+        };
+        document.head.appendChild(altScript);
+      };
+      document.head.appendChild(script);
+    }
+
+    // Audio SFX Manager
+    class HologramAudio {
+      constructor() {
+        this.ctx = null;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) this.ctx = new AudioContext();
+        }
+      }
+      playPing() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(660, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1320, this.ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.12);
+      }
+      playSwitch() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(900, this.ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.25);
+      }
+    }
+    const audioSFX = new HologramAudio();
+    document.addEventListener('pointerdown', () => audioSFX.init(), { once: true });
+
+    function initHologramApp() {
+      const handStatusText = document.getElementById('handStatusText');
+      if (handStatusText) handStatusText.innerText = '摄像头未开启';
+
+      const RELIC_DATA = [
+        {
+          id: 'gltf_custom',
+          name: 'glTF 3D三维全息模型',
+          period: '数字重构 (glTF 2.0 PBR)',
+          site: '用户传入网格 / 材质节点',
+          desc: '通过 THREE.GLTFLoader 载入的3D全息模型。支持高精度PBR法线贴图、粗糙度与金属度计算，可结合全息激光环与手势操控体验。',
+          hotspots: [
+            { pos: [0, 0.4, 0.5], title: '3D网格与PBR材质', desc: '采用glTF 2.0标准材质节点与Normal法线贴图，精准呈现光影质感。' },
+            { pos: [0, 1.0, 0.2], title: '全息光效融合', desc: '点光源与环境束光投射，打造高保真全息沉浸视觉体验。' },
+            { pos: [0, -0.6, 0.3], title: '手势与视角缩放', desc: '支持单手旋转、双手缩放、捏合切换以及鼠标/触控拖拽。' }
+          ]
+        },
+        {
+          id: 'horse',
+          name: '唐三彩黑釉马',
+          period: '盛唐时期 (8世纪)',
+          site: '洛阳唐墓出土',
+          desc: '唐三彩中的极品。全身施罕见的珍贵黑釉，马鞍与饰物施黄、绿、白三色。昂首挺立，肌肉矫健，展现了大唐帝国的万朝来朝与雄浑马文化。',
+          hotspots: [
+            { pos: [0.1, 0.4, 0.6], title: '流彩马鞍', desc: '马鞍铺垫绿釉与黄釉织锦，垂饰流苏，铅釉在高温下自然流淌融汇，呈现独一无二的绚丽纹理。' },
+            { pos: [0, 1.2, 0.7], title: '昂首矫健', desc: '马头微偏，双耳如削竹，剪鬃分鬈，骨肉匀称，完美呈现唐代西域汗血宝马的神韵。' },
+            { pos: [0, -0.9, 0.2], title: '三彩铅釉', desc: '采用铜（绿）、铁（黄）、钴（蓝）等金属氧化物为着色剂，以低温铅釉烧制而成。' }
+          ]
+        },
+        {
+          id: 'camel',
+          name: '唐三彩骆驼载乐俑',
+          period: '盛唐时期 (8世纪)',
+          site: '西安唐墓出土',
+          desc: '丝绸之路繁荣的巅峰象征。高大强壮的双峰骆驼仰天长鸣，驼背上搭架乐床，胡人与汉人乐俑围坐演奏西域胡乐。',
+          hotspots: [
+            { pos: [0, 0.5, 0.5], title: '驼背乐床', desc: '驼峰间铺设长毯乐床，乐师手持琵琶、箜篌等西域乐器，演配乐舞，展现文化大融合。' },
+            { pos: [0, 1.5, 0.6], title: '仰天长啸', desc: '骆驼伸颈张口仰天长鸣，形象生动传神，仿佛能听到沙漠丝路上的清脆驼铃。' },
+            { pos: [0, -0.6, 0.4], title: '绿琥珀交辉', desc: '驼身施深褐与黄琥珀釉，水毯施翡翠绿釉，三彩流釉淋漓尽致。' }
+          ]
+        },
+        {
+          id: 'guardian',
+          name: '唐三彩天王俑',
+          period: '盛唐时期 (8世纪)',
+          site: '陕西省历史博物馆藏',
+          desc: '唐代墓葬守护神。天王头戴盔冠，身披明光铠甲，怒目圆睁，手握拳威慑，脚踏小鬼，气势威武凶猛。',
+          hotspots: [
+            { pos: [0, 1.3, 0.2], title: '展翅盔冠', desc: '头戴鸟形或飞龙展翅盔冠，面部表情狰狞威严，用以驱邪镇墓。' },
+            { pos: [0, 0.4, 0.5], title: '流彩明光甲', desc: '胸前明光圆护，肩披兽首铠甲，黄、绿、白三色釉交相辉映，极具视觉冲击力。' },
+            { pos: [0, -1.1, 0.3], title: '脚踩伏夜叉', desc: '足穿高靴，强有力地踩踏趴伏在地的匍匐小鬼，象征正义镇压邪恶。' }
+          ]
+        },
+        {
+          id: 'platter',
+          name: '唐三彩宝相花纹三足盘',
+          period: '盛唐时期 (8世纪)',
+          site: '河南博物院藏',
+          desc: '盛唐宫廷与贵族宴饮重器。盘心印刻宝相花纹饰，点施蓝、黄、绿、白等色釉，色泽艳丽浓重，富有西域流光溢彩之美。',
+          hotspots: [
+            { pos: [0, 0.1, 0.8], title: '宝相花心', desc: '盘心以刻划填彩工艺呈现团花宝相花，蓝釉（钴料）点缀极度奢华珍贵。' },
+            { pos: [0, 0.9, 0.2], title: '折沿流彩', desc: '盘沿微卷，釉色向盘心自然渗化晕染，呈现千变万化的三彩流釉之美。' },
+            { pos: [0, -0.8, 0.1], title: '兽首三足', desc: '盘底承以三个支撑力学优美的兽首卷足，典雅庄重。' }
+          ]
+        }
+      ];
+
+      const canvas3D = document.getElementById('threeCanvas');
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 0.5, 5.5);
+
+      const renderer = new THREE.WebGLRenderer({ canvas: canvas3D, alpha: true, antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+      // Illumination
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+      dirLight.position.set(5, 8, 5);
+      scene.add(dirLight);
+
+      const pointLight = new THREE.PointLight(0x00f0ff, 1.5, 10);
+      pointLight.position.set(-3, 2, -2);
+      scene.add(pointLight);
+
+      const amberPointLight = new THREE.PointLight(0xfbbf24, 2.0, 10);
+      amberPointLight.position.set(0, -1, 3);
+      scene.add(amberPointLight);
+
+      // Materials
+      const sancaiAmberMat = new THREE.MeshStandardMaterial({
+        color: 0xd97706, roughness: 0.2, metalness: 0.1, clearcoat: 0.6
+      });
+
+      const sancaiGreenMat = new THREE.MeshStandardMaterial({
+        color: 0x008f53, roughness: 0.15, metalness: 0.2, clearcoat: 0.8
+      });
+
+      const sancaiWhiteMat = new THREE.MeshStandardMaterial({
+        color: 0xedebe4, roughness: 0.25, metalness: 0.1
+      });
+
+      const sancaiBlackMat = new THREE.MeshStandardMaterial({
+        color: 0x18181b, roughness: 0.1, metalness: 0.3, clearcoat: 1.0
+      });
+
+      const sancaiCobaltMat = new THREE.MeshStandardMaterial({
+        color: 0x1d4ed8, roughness: 0.15, metalness: 0.3, clearcoat: 0.9
+      });
+
+      const holoWireMat = new THREE.MeshBasicMaterial({
+        color: 0x00f0ff, wireframe: true, transparent: true, opacity: 0.22
+      });
+
+      const baseGroup = new THREE.Group();
+      baseGroup.position.y = -2.1;
+      scene.add(baseGroup);
+
+      const baseRingGeo = new THREE.RingGeometry(1.2, 1.55, 36);
+      const baseRingMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide, transparent: true, opacity: 0.35, wireframe: true });
+      const baseRing = new THREE.Mesh(baseRingGeo, baseRingMat);
+      baseRing.rotation.x = Math.PI / 2;
+      baseGroup.add(baseRing);
+
+      // Upward Floating Particle Ring
+      const particleCount = 140;
+      const particleGeo = new THREE.BufferGeometry();
+      const particlePos = new Float32Array(particleCount * 3);
+      for(let i = 0; i < particleCount * 3; i += 3) {
+        const angle = Math.random() * Math.PI * 2;
+        const rad = 0.7 + Math.random() * 0.9;
+        particlePos[i] = Math.cos(angle) * rad;
+        particlePos[i+1] = Math.random() * 3.6;
+        particlePos[i+2] = Math.sin(angle) * rad;
+      }
+      particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+      const particleMat = new THREE.PointsMaterial({ color: 0xfbbf24, size: 0.028, transparent: true, opacity: 0.65 });
+      const particleSystem = new THREE.Points(particleGeo, particleMat);
+      baseGroup.add(particleSystem);
+
+      // Vertical Laser Scanning Ring
+      const scanBeamGeo = new THREE.TorusGeometry(1.45, 0.012, 16, 64);
+      const scanBeamMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.75 });
+      const scanBeam = new THREE.Mesh(scanBeamGeo, scanBeamMat);
+      scanBeam.rotation.x = Math.PI / 2;
+      scene.add(scanBeam);
+
+      function attachHoloWire(group, mesh) {
+        const wire = new THREE.Mesh(mesh.geometry, holoWireMat);
+        wire.position.copy(mesh.position);
+        wire.rotation.copy(mesh.rotation);
+        wire.scale.copy(mesh.scale).multiplyScalar(1.02);
+        group.add(wire);
+      }
+
+      function createHorseModel() {
+        const group = new THREE.Group();
+        const bodyGeo = new THREE.CylinderGeometry(0.45, 0.55, 1.4, 16);
+        const body = new THREE.Mesh(bodyGeo, sancaiBlackMat);
+        body.rotation.z = Math.PI / 2;
+        group.add(body);
+        attachHoloWire(group, body);
+
+        const neckGeo = new THREE.CylinderGeometry(0.22, 0.38, 0.9, 12);
+        const neck = new THREE.Mesh(neckGeo, sancaiBlackMat);
+        neck.position.set(0.65, 0.55, 0);
+        neck.rotation.z = -0.6;
+        group.add(neck);
+
+        const headGeo = new THREE.BoxGeometry(0.55, 0.28, 0.28);
+        const head = new THREE.Mesh(headGeo, sancaiBlackMat);
+        head.position.set(1.0, 1.0, 0);
+        head.rotation.z = -0.2;
+        group.add(head);
+
+        const saddleGeo = new THREE.TorusGeometry(0.58, 0.15, 12, 24, Math.PI);
+        const saddle = new THREE.Mesh(saddleGeo, sancaiAmberMat);
+        saddle.position.set(0, 0.05, 0);
+        saddle.rotation.y = Math.PI / 2;
+        group.add(saddle);
+
+        const blanketGeo = new THREE.BoxGeometry(0.7, 0.08, 0.9);
+        const blanket = new THREE.Mesh(blanketGeo, sancaiGreenMat);
+        blanket.position.set(0, 0.12, 0);
+        group.add(blanket);
+
+        const legPositions = [
+          [0.5, -0.8, 0.25], [0.5, -0.8, -0.25],
+          [-0.5, -0.8, 0.25], [-0.5, -0.8, -0.25]
+        ];
+        legPositions.forEach(pos => {
+          const legGeo = new THREE.CylinderGeometry(0.1, 0.07, 1.1, 10);
+          const leg = new THREE.Mesh(legGeo, sancaiBlackMat);
+          leg.position.set(...pos);
+          group.add(leg);
+        });
+
+        const baseGeo = new THREE.BoxGeometry(1.8, 0.1, 0.9);
+        const baseMesh = new THREE.Mesh(baseGeo, sancaiWhiteMat);
+        baseMesh.position.y = -1.35;
+        group.add(baseMesh);
+
+        return group;
+      }
+
+      function createCamelModel() {
+        const group = new THREE.Group();
+        const bodyGeo = new THREE.CylinderGeometry(0.5, 0.6, 1.5, 14);
+        const body = new THREE.Mesh(bodyGeo, sancaiAmberMat);
+        body.rotation.z = Math.PI / 2;
+        group.add(body);
+        attachHoloWire(group, body);
+
+        [-0.3, 0.3].forEach(x => {
+          const humpGeo = new THREE.ConeGeometry(0.35, 0.6, 12);
+          const hump = new THREE.Mesh(humpGeo, sancaiGreenMat);
+          hump.position.set(x, 0.55, 0);
+          group.add(hump);
+        });
+
+        const curve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(0.65, 0.2, 0),
+          new THREE.Vector3(0.9, 0.8, 0),
+          new THREE.Vector3(0.75, 1.4, 0)
+        ]);
+        const neckGeo = new THREE.TubeGeometry(curve, 16, 0.2, 10, false);
+        const neck = new THREE.Mesh(neckGeo, sancaiAmberMat);
+        group.add(neck);
+
+        const headGeo = new THREE.BoxGeometry(0.4, 0.22, 0.22);
+        const head = new THREE.Mesh(headGeo, sancaiAmberMat);
+        head.position.set(0.85, 1.5, 0);
+        head.rotation.z = -0.3;
+        group.add(head);
+
+        const platformGeo = new THREE.BoxGeometry(0.8, 0.15, 0.8);
+        const platform = new THREE.Mesh(platformGeo, sancaiWhiteMat);
+        platform.position.set(0, 0.35, 0);
+        group.add(platform);
+
+        const legPositions = [
+          [0.55, -0.9, 0.25], [0.55, -0.9, -0.25],
+          [-0.55, -0.9, 0.25], [-0.55, -0.9, -0.25]
+        ];
+        legPositions.forEach(pos => {
+          const legGeo = new THREE.CylinderGeometry(0.11, 0.08, 1.3, 10);
+          const leg = new THREE.Mesh(legGeo, sancaiAmberMat);
+          leg.position.set(...pos);
+          group.add(leg);
+        });
+
+        return group;
+      }
+
+      function createGuardianModel() {
+        const group = new THREE.Group();
+        const torsoGeo = new THREE.CylinderGeometry(0.45, 0.35, 1.1, 12);
+        const torso = new THREE.Mesh(torsoGeo, sancaiGreenMat);
+        torso.position.y = 0.2;
+        group.add(torso);
+        attachHoloWire(group, torso);
+
+        [-0.18, 0.18].forEach(x => {
+          const mirrorGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.08, 16);
+          const mirror = new THREE.Mesh(mirrorGeo, sancaiAmberMat);
+          mirror.position.set(x, 0.35, 0.22);
+          mirror.rotation.x = Math.PI / 2;
+          group.add(mirror);
+        });
+
+        const headGeo = new THREE.BoxGeometry(0.35, 0.4, 0.35);
+        const head = new THREE.Mesh(headGeo, sancaiWhiteMat);
+        head.position.y = 1.0;
+        group.add(head);
+
+        const helmetGeo = new THREE.ConeGeometry(0.32, 0.45, 8);
+        const helmet = new THREE.Mesh(helmetGeo, sancaiAmberMat);
+        helmet.position.y = 1.35;
+        group.add(helmet);
+
+        [-0.48, 0.48].forEach((x, i) => {
+          const armGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 8);
+          const arm = new THREE.Mesh(armGeo, sancaiAmberMat);
+          arm.position.set(x, 0.2, 0.1);
+          arm.rotation.z = i === 0 ? 0.4 : -0.4;
+          group.add(arm);
+        });
+
+        const demonGeo = new THREE.BoxGeometry(0.8, 0.4, 0.6);
+        const demon = new THREE.Mesh(demonGeo, sancaiCobaltMat);
+        demon.position.y = -0.9;
+        group.add(demon);
+
+        return group;
+      }
+
+      function createPlatterModel() {
+        const group = new THREE.Group();
+        const platterGeo = new THREE.CylinderGeometry(1.4, 1.1, 0.22, 32);
+        const platter = new THREE.Mesh(platterGeo, sancaiAmberMat);
+        platter.rotation.x = 0.4;
+        group.add(platter);
+        attachHoloWire(group, platter);
+
+        const innerGeo = new THREE.CylinderGeometry(0.9, 0.9, 0.24, 32);
+        const innerPattern = new THREE.Mesh(innerGeo, sancaiCobaltMat);
+        innerPattern.rotation.x = 0.4;
+        group.add(innerPattern);
+
+        const petalCount = 8;
+        for (let i = 0; i < petalCount; i++) {
+          const angle = (i / petalCount) * Math.PI * 2;
+          const petalGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.26, 12);
+          const petal = new THREE.Mesh(petalGeo, i % 2 === 0 ? sancaiGreenMat : sancaiWhiteMat);
+          petal.position.set(Math.cos(angle) * 0.55, Math.sin(angle) * 0.55 * Math.cos(0.4), Math.sin(angle) * 0.55 * Math.sin(0.4));
+          petal.rotation.x = 0.4;
+          group.add(petal);
+        }
+
+        for (let i = 0; i < 3; i++) {
+          const angle = (i / 3) * Math.PI * 2;
+          const footGeo = new THREE.ConeGeometry(0.12, 0.35, 8);
+          const foot = new THREE.Mesh(footGeo, sancaiGreenMat);
+          foot.position.set(Math.cos(angle) * 0.9, -0.3, Math.sin(angle) * 0.9);
+          group.add(foot);
+        }
+
+        return group;
+      }
+
+      function normalizeAndCenterModel(model) {
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 2.4 / (maxDim || 1);
+        model.scale.set(scale, scale, scale);
+
+        const center = box.getCenter(new THREE.Vector3());
+        model.position.sub(center.multiplyScalar(scale));
+
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.material.side = THREE.DoubleSide;
+          }
+        });
+      }
+
+      const gltfPlaceholderGroup = createHorseModel();
+
+      const relicModels = [
+        gltfPlaceholderGroup,
+        createHorseModel(),
+        createCamelModel(),
+        createGuardianModel(),
+        createPlatterModel()
+      ];
+
+      let currentRelicIdx = 0;
+      const relicContainer = new THREE.Group();
+      scene.add(relicContainer);
+      relicContainer.add(relicModels[0]);
+
+      function clearGroup(group) {
+        while (group.children.length > 0) {
+          group.remove(group.children[0]);
+        }
+      }
+
+      function loadGLTFArrayBuffer(buffer) {
+        if (typeof THREE.GLTFLoader === 'undefined') {
+          console.warn('GLTFLoader is not available.');
+          return;
+        }
+        const loader = new THREE.GLTFLoader();
+        loader.parse(buffer, '', (gltf) => {
+          const loadedModel = gltf.scene;
+          normalizeAndCenterModel(loadedModel);
+          
+          relicModels[0] = loadedModel;
+          if (currentRelicIdx === 0) {
+            clearGroup(relicContainer);
+            relicContainer.add(loadedModel);
+          }
+        }, (err) => {
+          console.warn('GLTF ArrayBuffer parse error:', err);
+        });
+      }
+
+      document.getElementById('gltfFileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          audioSFX.playSwitch();
+          loadGLTFArrayBuffer(evt.target.result);
+          
+          switchRelic(0);
+          document.getElementById('infoTopicTitle').innerText = '已加载自定义模型';
+          document.getElementById('infoTopicDesc').innerText = `已从本地载入【${file.name}】(${(file.size / 1024 / 1024).toFixed(2)} MB)，已自动完成三维全息居中与光效烘托。`;
+        };
+        reader.readAsArrayBuffer(file);
+      });
+
+      const hotspotContainerEl = document.getElementById('hotspotContainer');
+      let activeHotspotElements = [];
+
+      function updateHotspots() {
+        activeHotspotElements.forEach(item => {
+          if (item && item.element) {
+            item.element.remove();
+          }
+        });
+        activeHotspotElements = [];
+
+        const currentData = RELIC_DATA[currentRelicIdx];
+        currentData.hotspots.forEach((hs) => {
+          const el = document.createElement('div');
+          el.className = 'absolute pointer-events-auto transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group';
+          el.innerHTML = `
+            <div class="relative flex items-center justify-center">
+              <div class="absolute w-6 h-6 rounded-full bg-amber-400/40 hotspot-pulse"></div>
+              <div class="w-3 h-3 rounded-full bg-amber-400 border-2 border-white shadow-[0_0_12px_#fbbf24] group-hover:scale-125 transition"></div>
+              <div class="absolute left-4 whitespace-nowrap glass-panel px-2 py-0.5 rounded text-[10px] text-amber-200 border border-amber-500/40 opacity-85 group-hover:opacity-100 transition">
+                ${hs.title}
+              </div>
+            </div>
+          `;
+          el.onclick = () => {
+            audioSFX.playPing();
+            document.getElementById('infoTopicTitle').innerText = hs.title;
+            document.getElementById('infoTopicDesc').innerText = hs.desc;
+          };
+          hotspotContainerEl.appendChild(el);
+          activeHotspotElements.push({ element: el, pos: new THREE.Vector3(...hs.pos) });
+        });
+      }
+
+      function renderHotspotPositions() {
+        activeHotspotElements.forEach(item => {
+          const worldPos = item.pos.clone();
+          worldPos.applyMatrix4(relicContainer.matrixWorld);
+          
+          worldPos.project(camera);
+          const x = (worldPos.x * 0.5 + 0.5) * window.innerWidth;
+          const y = (-(worldPos.y * 0.5) + 0.5) * window.innerHeight;
+
+          if (worldPos.z > 1) {
+            item.element.style.display = 'none';
+          } else {
+            item.element.style.display = 'block';
+            item.element.style.left = `${x}px`;
+            item.element.style.top = `${y}px`;
+          }
+        });
+      }
+
+      // Switch Relic Function
+      function switchRelic(index) {
+        if (index === currentRelicIdx && relicContainer.children.length > 0) return;
+        audioSFX.playSwitch();
+
+        const oldModel = relicModels[currentRelicIdx];
+        currentRelicIdx = index;
+        const newModel = relicModels[currentRelicIdx];
+
+        relicContainer.remove(oldModel);
+        relicContainer.add(newModel);
+        relicContainer.scale.set(0.1, 0.1, 0.1);
+
+        let scaleProgress = 0.1;
+        const animInt = setInterval(() => {
+          scaleProgress += 0.09;
+          if (scaleProgress >= 1.0) {
+            scaleProgress = 1.0;
+            clearInterval(animInt);
+          }
+          relicContainer.scale.set(scaleProgress, scaleProgress, scaleProgress);
+        }, 16);
+
+        const data = RELIC_DATA[currentRelicIdx];
+        document.getElementById('relicTitle').innerText = data.name;
+        document.getElementById('infoTopicTitle').innerText = '文物概览';
+        document.getElementById('infoTopicDesc').innerText = data.desc;
+
+        document.querySelectorAll('.relic-btn').forEach((btn, idx) => {
+          if (idx === currentRelicIdx) {
+            btn.className = 'relic-btn px-2.5 py-1 rounded-lg border border-amber-400/50 bg-amber-900/50 text-amber-200 text-[11px] font-medium transition';
+          } else {
+            btn.className = 'relic-btn px-2.5 py-1 rounded-lg border border-transparent text-gray-400 text-[11px] font-medium transition hover:bg-amber-950/50 hover:text-amber-300';
+          }
+        });
+
+        updateHotspots();
+      }
+      window.switchRelic = switchRelic;
+      updateHotspots();
+
+      const videoElement = document.getElementById('webcam');
+      const skeletonCanvas = document.getElementById('skeletonCanvas');
+      const skeletonCtx = skeletonCanvas.getContext('2d');
+
+      let cameraUtils = null;
+      let handsDetector = null;
+      let isWebcamActive = false;
+      let isProcessingFrame = false;
+
+      let prevHandPos = null;
+      let prevPinchDistTwoHands = null;
+      let lastPinchTime = 0;
+      let pinchCount = 0;
+
+      function resizeCanvas() {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        skeletonCanvas.width = window.innerWidth;
+        skeletonCanvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      // Darkroom Opacity Slider Listener
+      const bgOpacitySlider = document.getElementById('bgOpacitySlider');
+      const darkroomOverlay = document.getElementById('darkroomOverlay');
+      const opacityValText = document.getElementById('opacityValText');
+
+      bgOpacitySlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        opacityValText.innerText = `${val}%`;
+        darkroomOverlay.style.opacity = val / 100;
+      });
+
+      // Draw Skeleton on Skeleton Overlay Canvas
+      function drawSkeleton(landmarks) {
+        const w = skeletonCanvas.width;
+        const h = skeletonCanvas.height;
+
+        const connections = [
+          [0,1],[1,2],[2,3],[3,4],
+          [0,5],[5,6],[6,7],[7,8],
+          [5,9],[9,10],[10,11],[11,12],
+          [9,13],[13,14],[14,15],[15,16],
+          [13,17],[17,18],[18,19],[19,20],[0,17]
+        ];
+
+        skeletonCtx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+        skeletonCtx.lineWidth = 2;
+
+        connections.forEach(([i, j]) => {
+          const p1 = landmarks[i];
+          const p2 = landmarks[j];
+          skeletonCtx.beginPath();
+          skeletonCtx.moveTo(p1.x * w, p1.y * h);
+          skeletonCtx.lineTo(p2.x * w, p2.y * h);
+          skeletonCtx.stroke();
+        });
+
+        landmarks.forEach((p, idx) => {
+          skeletonCtx.fillStyle = (idx === 8 || idx === 4) ? '#00ffff' : '#fbbf24';
+          skeletonCtx.beginPath();
+          skeletonCtx.arc(p.x * w, p.y * h, (idx === 8 || idx === 4) ? 5 : 3, 0, Math.PI * 2);
+          skeletonCtx.fill();
+        });
+      }
+
+      function onHandResults(results) {
+        skeletonCtx.clearRect(0, 0, skeletonCanvas.width, skeletonCanvas.height);
+
+        const handStatusDot = document.getElementById('handStatusDot');
+        const statusText = document.getElementById('handStatusText');
+
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+          handStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+          if (statusText) statusText.innerText = '未检测到手势 | 鼠标/触摸可拖拽';
+          prevHandPos = null;
+          prevPinchDistTwoHands = null;
+          return;
+        }
+
+        handStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+
+        results.multiHandLandmarks.forEach(landmarks => drawSkeleton(landmarks));
+
+        const handCount = results.multiHandLandmarks.length;
+
+        // Single Hand -> Rotation Control
+        if (handCount === 1) {
+          const landmarks = results.multiHandLandmarks[0];
+          const indexTip = landmarks[8];
+          const thumbTip = landmarks[4];
+
+          if (statusText) statusText.innerText = '单手控制: 移动旋转视角';
+
+          if (prevHandPos) {
+            const dx = (indexTip.x - prevHandPos.x) * 5;
+            const dy = (indexTip.y - prevHandPos.y) * 5;
+
+            relicContainer.rotation.y += dx;
+            relicContainer.rotation.x += dy;
+          }
+          prevHandPos = { x: indexTip.x, y: indexTip.y };
+          prevPinchDistTwoHands = null;
+
+          // Double Pinch Switch
+          const pinchDist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+          if (pinchDist < 0.05) {
+            const now = Date.now();
+            if (now - lastPinchTime > 100 && now - lastPinchTime < 500) {
+              pinchCount++;
+              if (pinchCount >= 2) {
+                const nextIdx = (currentRelicIdx + 1) % RELIC_DATA.length;
+                switchRelic(nextIdx);
+                if (statusText) statusText.innerText = '👌👌 双捏合成功！切换文物';
+                pinchCount = 0;
+              }
+            } else if (now - lastPinchTime >= 500) {
+              pinchCount = 1;
+            }
+            lastPinchTime = now;
+          }
+        }
+        // Two Hands -> Zoom Scale Control
+        else if (handCount >= 2) {
+          const hand1Index = results.multiHandLandmarks[0][8];
+          const hand2Index = results.multiHandLandmarks[1][8];
+
+          const twoHandDist = Math.hypot(hand1Index.x - hand2Index.x, hand1Index.y - hand2Index.y);
+
+          if (prevPinchDistTwoHands !== null) {
+            const scaleDelta = (twoHandDist - prevPinchDistTwoHands) * 2.5;
+            let newScale = relicContainer.scale.x + scaleDelta;
+            newScale = Math.max(0.4, Math.min(2.3, newScale));
+            relicContainer.scale.set(newScale, newScale, newScale);
+
+            if (statusText) statusText.innerText = `双手缩放: ${(newScale).toFixed(1)}x`;
+          }
+          prevPinchDistTwoHands = twoHandDist;
+          prevHandPos = null;
+        }
+      }
+
+      // Initialize MediaPipe Hands & Camera
+      async function initCameraAndMediaPipe() {
+        if (typeof Hands === 'undefined') {
+          document.getElementById('handStatusText').innerText = 'MediaPipe未加载，开启触摸模式';
+          return;
+        }
+
+        if (!handsDetector) {
+          handsDetector = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+          });
+
+          handsDetector.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+          });
+
+          handsDetector.onResults(onHandResults);
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+          videoElement.srcObject = stream;
+          videoElement.classList.remove('hidden');
+
+          await new Promise((resolve) => {
+            if (videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+              resolve();
+            } else {
+              videoElement.onloadedmetadata = () => {
+                videoElement.play().then(resolve).catch(resolve);
+              };
+            }
+          });
+
+          if (!cameraUtils) {
+            cameraUtils = new Camera(videoElement, {
+              onFrame: async () => {
+                if (isProcessingFrame) return;
+                if (!videoElement || videoElement.paused || videoElement.ended || videoElement.readyState < 2 || !videoElement.videoWidth) {
+                  return;
+                }
+
+                isProcessingFrame = true;
+                try {
+                  await handsDetector.send({ image: videoElement });
+                } catch (err) {
+                  console.warn('MediaPipe frame processing warning:', err);
+                } finally {
+                  isProcessingFrame = false;
+                }
+              },
+              width: 1280,
+              height: 720
+            });
+          }
+
+          cameraUtils.start();
+          isWebcamActive = true;
+          document.getElementById('handStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+          document.getElementById('handStatusText').innerText = '手势检测就绪';
+          document.getElementById('camBtnText').innerText = '关闭摄像头';
+        } catch (err) {
+          console.warn('Webcam permission denied or error:', err);
+          document.getElementById('handStatusText').innerText = '未获取摄像头，使用鼠标/触摸拖拽';
+        }
+      }
+
+      document.getElementById('camToggleBtn').addEventListener('click', () => {
+        if (!isWebcamActive) {
+          initCameraAndMediaPipe();
+        } else {
+          if (cameraUtils) {
+            try { cameraUtils.stop(); } catch (e) {}
+          }
+          if (videoElement.srcObject) {
+            videoElement.srcObject.getTracks().forEach(track => track.stop());
+            videoElement.srcObject = null;
+          }
+          videoElement.classList.add('hidden');
+          isWebcamActive = false;
+          isProcessingFrame = false;
+          document.getElementById('handStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+          document.getElementById('handStatusText').innerText = '摄像头已关闭';
+          document.getElementById('camBtnText').innerText = '开启手势操控';
+          skeletonCtx.clearRect(0, 0, skeletonCanvas.width, skeletonCanvas.height);
+        }
+      });
+
+      let isDragging = false;
+      let previousMousePosition = { x: 0, y: 0 };
+
+      canvas3D.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+      });
+
+      canvas3D.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+
+        const deltaMove = {
+          x: e.clientX - previousMousePosition.x,
+          y: e.clientY - previousMousePosition.y
+        };
+
+        relicContainer.rotation.y += deltaMove.x * 0.008;
+        relicContainer.rotation.x += deltaMove.y * 0.008;
+
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+      });
+
+      window.addEventListener('pointerup', () => { isDragging = false; });
+
+      // Wheel Zoom
+      canvas3D.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        let scale = relicContainer.scale.x - e.deltaY * 0.0015;
+        scale = Math.max(0.4, Math.min(2.5, scale));
+        relicContainer.scale.set(scale, scale, scale);
+      }, { passive: false });
+
+      let clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        const elapsedTime = clock.getElapsedTime();
+
+        // Gentle floating animation
+        relicContainer.position.y = Math.sin(elapsedTime * 1.5) * 0.07;
+        
+        // Auto gentle rotation if idle
+        if (!isDragging && !prevHandPos) {
+          relicContainer.rotation.y += 0.0025;
+        }
+
+        baseRing.rotation.z = elapsedTime * 0.2;
+        scanBeam.position.y = Math.sin(elapsedTime * 1.8) * 1.8;
+
+        const positions = particleGeo.attributes.position.array;
+        for (let i = 1; i < particleCount * 3; i += 3) {
+          positions[i] += 0.012;
+          if (positions[i] > 3.6) positions[i] = 0;
+        }
+        particleGeo.attributes.position.needsUpdate = true;
+
+        renderHotspotPositions();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+    }
+
+    // Launch application safely when DOM and scripts are ready
+    window.addEventListener('DOMContentLoaded', () => {
+      ensureThreeLoaded(initHologramApp);
+    });
+  </script>
+</body>
+</html>
